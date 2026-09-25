@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 35%, #311042 70%, #0f172a 100%);
+    min-height: 100vh;
+    color: #f8fafc;
+    overflow-x: hidden;
+  }
+}
+
+.font-certificate-title {
+  font-family: 'Playfair Display', Georgia, serif;
+}
+
+.font-signature {
+  font-family: 'Dancing Script', cursive;
+}
+
+/* Glassmorphism Card Effect */
+.glass-card {
+  background: rgba(30, 41, 59, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* Marquee Animation */
+.marquee-container {
+  overflow: hidden;
+  white-space: nowrap;
+  background: linear-gradient(90deg, #f59e0b, #ef4444, #ec4899, #8b5cf6, #f59e0b);
+  background-size: 300% 300%;
+  animation: gradientShift 6s ease infinite;
+}
+
+.marquee-text {
+  display: inline-block;
+  padding-left: 100%;
+  animation: marquee 22s linear infinite;
+}
+
+@keyframes marquee {
+  0% { transform: translate(0, 0); }
+  100% { transform: translate(-100%, 0); }
+}
+
+@keyframes gradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Certificate Styling */
+.certificate-border {
+  border: 12px double #d97706;
+  outline: 3px solid #fef3c7;
+  outline-offset: -8px;
+  background: #fffdf5;
+  color: #1e293b;
+}
+
+/* Red Seal Stamp Graphic */
+.red-seal {
+  width: 110px;
+  height: 110px;
+  border: 3px dashed #dc2626;
+  border-radius: 50%;
+  color: #dc2626;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  transform: rotate(-12deg);
+  opacity: 0.95;
+  box-shadow: 0 0 0 3px #ef4444 inset;
+  background: rgba(254, 226, 226, 0.2);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.btn-glow {
+  transition: all 0.25s ease-in-out;
+  box-shadow: 0 0 15px rgba(236, 72, 153, 0.4);
+}
+.btn-glow:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 0 25px rgba(236, 72, 153, 0.8);
+}
+
+.option-btn {
+  transition: all 0.2s ease;
+}
+.option-btn:hover:not(:disabled) {
+  transform: translateX(6px);
+  background-color: rgba(99, 102, 241, 0.25);
+}
+
+.chat-bubble-user {
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  color: white;
+  border-radius: 18px 18px 2px 18px;
+}
+.chat-bubble-bot {
+  background: #1e293b;
+  color: #f1f5f9;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px 18px 18px 2px;
+}
+
+.recording-pulse {
+  animation: pulse-ring 1.25s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+@keyframes pulse-ring {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+  70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}

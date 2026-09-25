@@ -1,0 +1,6 @@
+{
+  "name": "Game Học Tập Tiếng Anh 8 - Unit 2 (THCS Tân Dĩnh)",
+  "description": "Game ôn tập Tiếng Anh 8 Global Success Unit 2: Life in the countryside với chatbot trợ lý Miss Yến còi và bộ mã nguồn chuẩn Google Apps Script.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
