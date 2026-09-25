@@ -46,11 +46,8 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
         {/* Certificate Frame */}
         <div className="certificate-border p-6 sm:p-10 rounded-xl shadow-2xl relative overflow-hidden text-center select-none bg-[#fffdf5]">
           {/* Header */}
-          <div className="text-[11px] sm:text-xs md:text-sm font-bold uppercase tracking-widest text-slate-700">
-            BỘ GIÁO DỤC VÀ ĐÀO TẠO • TRƯỜNG THCS TÂN DĨNH
-          </div>
-          <div className="text-[10px] sm:text-xs text-amber-800 font-semibold mb-3">
-            CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM — ĐỘC LẬP - TỰ DO - HẠNH PHÚC
+          <div className="text-xs sm:text-sm md:text-base font-bold uppercase tracking-wider text-slate-700 mb-3">
+            Trường THCS Tân Dĩnh, xã Tân Dĩnh, Thành phố Bắc Ninh
           </div>
 
           <div className="my-3">

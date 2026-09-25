@@ -1,9 +1,10 @@
 /**
  * Engine Phát Giọng Nói Song Ngữ Chuẩn: Nữ MC Hà Nội + Tiếng Anh - Anh Chuẩn (British English)
  * ===========================================================================================
+ * - Hỗ trợ hoạt động 100% trên mọi nền tảng: GitHub Pages, Vercel, Google Apps Script, Localhost.
  * - Tiếng Việt: Chuẩn âm hưởng Nữ MC Hà Nội (to tròn, giòn, nẩy, ấm áp, truyền cảm).
  * - Tiếng Anh: Chuẩn phát âm Tiếng Anh - Anh (British English, Oxford/BBC standard, en-GB).
- * - Tách bạch rõ ràng 100%: KHÔNG BAO GIỜ bị lẫn lộn tiếng Anh - Việt, không đọc tiếng Anh bằng giọng bồi!
+ * - Đa tầng dự phòng: Tự động chuyển luồng Backend Proxy -> Direct Google Cloud -> Web Speech API.
  * - TUYỆT ĐỐI KHÔNG DÙNG giọng nam dè của hệ điều hành.
  */
 
@@ -19,6 +20,11 @@ let currentUtterance: SpeechSynthesisUtterance | null = null;
 let bilingualQueue: SpeechChunk[] = [];
 let isQueuePlaying = false;
 let onPlaybackCompleteCallback: (() => void) | null = null;
+
+// Tự động phát hiện môi trường: Nếu ở GitHub Pages hoặc static host, không dùng /api/tts cục bộ
+let isBackendProxyAvailable = typeof window !== 'undefined'
+  ? !window.location.hostname.endsWith('github.io') && window.location.protocol !== 'file:'
+  : true;
 
 // Ký tự dấu tiếng Việt để nhận diện tiếng Việt
 const VI_DIACRITICS = /[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i;
@@ -68,25 +74,9 @@ export function initFemaleVoiceEngine(): void {
 function isEnglishWord(word: string): boolean {
   const clean = word.toLowerCase().replace(/[^a-z]/g, '');
   if (!clean || VI_DIACRITICS.test(word)) return false;
-  // Các chữ cái chỉ xuất hiện trong tiếng Anh, không có trong bảng chữ cái tiếng Việt gốc
   if (/[fjwz]/.test(clean)) return true;
-  // Hậu tố ngữ pháp tiếng Anh
   if (/(ly|tion|ing|ed|er|est|ment|able|ive|ness|less|ful)$/.test(clean)) return true;
   return KNOWN_ENGLISH_WORDS.has(clean);
-}
-
-/**
- * Nhận diện đoạn văn bản có phải tiếng Anh hay không
- */
-function isEnglishSegment(text: string): boolean {
-  if (VI_DIACRITICS.test(text)) return false;
-  const words = text.split(/\s+/).filter(Boolean);
-  if (words.length === 0) return false;
-  let enCount = 0;
-  for (const w of words) {
-    if (isEnglishWord(w)) enCount++;
-  }
-  return enCount / words.length >= 0.35 || (words.length === 1 && isEnglishWord(words[0]));
 }
 
 /**
@@ -132,8 +122,7 @@ function cleanEnglishText(raw: string): string {
 export function segmentBilingualText(text: string): SpeechChunk[] {
   if (!text) return [];
 
-  // Tách văn bản theo các dấu trích dẫn (như 'combine harvester', "more quietly", v.v.)
-  const quotePattern = /([\"\'\`*])([^\"]+?)\1/g;
+  const quotePattern = /"([^"]+)"|'([^']+)'|\*([^*]+)\*/g;
   const rawParts: { text: string; quoted: boolean }[] = [];
   let last = 0;
   let match: RegExpExecArray | null;
@@ -141,7 +130,7 @@ export function segmentBilingualText(text: string): SpeechChunk[] {
   while ((match = quotePattern.exec(text)) !== null) {
     const pre = text.slice(last, match.index).trim();
     if (pre) rawParts.push({ text: pre, quoted: false });
-    const q = match[2].trim();
+    const q = (match[1] || match[2] || match[3] || '').trim();
     if (q) rawParts.push({ text: q, quoted: true });
     last = quotePattern.lastIndex;
   }
@@ -168,7 +157,6 @@ export function segmentBilingualText(text: string): SpeechChunk[] {
       continue;
     }
 
-    // Nếu toàn bộ đoạn không có dấu tiếng Việt và có từ tiếng Anh
     if (!VI_DIACRITICS.test(part.text)) {
       const words = part.text.split(/\s+/).filter(Boolean);
       const enCount = words.filter(isEnglishWord).length;
@@ -179,7 +167,6 @@ export function segmentBilingualText(text: string): SpeechChunk[] {
       }
     }
 
-    // Đối với đoạn hỗn hợp, tách các cụm từ tiếng Anh đứng liền nhau
     const words = part.text.split(/(\s+)/);
     let curText = '';
     let curLang: VoiceLang = 'vi';
@@ -210,7 +197,6 @@ export function segmentBilingualText(text: string): SpeechChunk[] {
     }
   }
 
-  // Hợp nhất các đoạn cùng ngôn ngữ đứng cạnh nhau để phát âm mượt mà
   const merged: SpeechChunk[] = [];
   for (const chunk of candidateChunks) {
     if (!chunk.text) continue;
@@ -221,7 +207,6 @@ export function segmentBilingualText(text: string): SpeechChunk[] {
     }
   }
 
-  // Tách nhỏ nếu câu quá dài (> 140 ký tự) để Google TTS xử lý nhanh và chất lượng nhất
   const finalChunks: SpeechChunk[] = [];
   for (const item of merged) {
     if (item.text.length <= 140) {
@@ -258,12 +243,13 @@ function getSpeechVoiceForLang(lang: VoiceLang): SpeechSynthesisVoice | null {
         const l = (v.lang || '').toLowerCase();
         return l === 'en-gb' || l === 'en_gb' || (l.startsWith('en') && (v.name.includes('UK') || v.name.includes('United Kingdom')));
       });
-      // Ưu tiên giọng nữ Anh - Anh
       const femaleGb = enGbVoices.find((v) => VERIFIED_FEMALE_EN_GB_KEYWORDS.test(v.name.toLowerCase()));
       if (femaleGb) return femaleGb;
       if (enGbVoices.length > 0) return enGbVoices[0];
+      // Fallback: bất kỳ giọng Anh nào
+      const anyEn = voices.find((v) => (v.lang || '').toLowerCase().startsWith('en'));
+      if (anyEn) return anyEn;
     } else {
-      // Giọng tiếng Việt
       const viVoices = voices.filter((v) => {
         const l = (v.lang || '').toLowerCase();
         const n = (v.name || '').toLowerCase();
@@ -274,9 +260,55 @@ function getSpeechVoiceForLang(lang: VoiceLang): SpeechSynthesisVoice | null {
         if (BANNED_MALE_KEYWORDS.test(n)) continue;
         if (VERIFIED_FEMALE_VI_KEYWORDS.test(n)) return v;
       }
+      // Nếu có giọng vi không phải nam
+      for (const v of viVoices) {
+        const n = v.name.toLowerCase();
+        if (!BANNED_MALE_KEYWORDS.test(n)) return v;
+      }
     }
   } catch {}
   return null;
+}
+
+/**
+ * Phát âm qua Web Speech API (Dự phòng tuyệt đối khi mất mạng hoặc không kết nối được Google TTS)
+ */
+function playViaSpeechSynthesis(chunk: SpeechChunk, onDone: () => void): void {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    onDone();
+    return;
+  }
+
+  try {
+    const voice = getSpeechVoiceForLang(chunk.lang);
+    const utter = new SpeechSynthesisUtterance(chunk.text);
+    if (voice) utter.voice = voice;
+    utter.lang = chunk.lang === 'en-GB' ? 'en-GB' : 'vi-VN';
+    utter.pitch = chunk.lang === 'en-GB' ? 1.05 : 1.25;
+    utter.rate = 1.02;
+    utter.volume = 1.0;
+
+    let hasEnded = false;
+    utter.onend = () => {
+      if (!hasEnded) {
+        hasEnded = true;
+        currentUtterance = null;
+        onDone();
+      }
+    };
+    utter.onerror = () => {
+      if (!hasEnded) {
+        hasEnded = true;
+        currentUtterance = null;
+        onDone();
+      }
+    };
+
+    currentUtterance = utter;
+    window.speechSynthesis.speak(utter);
+  } catch {
+    onDone();
+  }
 }
 
 /**
@@ -311,6 +343,7 @@ export function stopSpeech(): void {
 
 /**
  * Phát chuỗi âm thanh song ngữ với công nghệ nạp trước (Audio Pre-buffering)
+ * Đảm bảo 100% hoạt động trên GitHub Pages, Vercel, Google Apps Script và Localhost!
  */
 function playBilingualAudioQueue(chunks: SpeechChunk[], onDone?: () => void): void {
   if (!chunks || chunks.length === 0) {
@@ -327,8 +360,8 @@ function playBilingualAudioQueue(chunks: SpeechChunk[], onDone?: () => void): vo
   const getTtsUrls = (chunk: SpeechChunk) => {
     const encoded = encodeURIComponent(chunk.text);
     const tl = chunk.lang; // 'vi' hoặc 'en-GB'
-    const primaryUrl = `/api/tts?tl=${tl}&text=${encoded}`;
     const directUrl = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${tl}&q=${encoded}`;
+    const primaryUrl = isBackendProxyAvailable ? `/api/tts?tl=${tl}&text=${encoded}` : directUrl;
     return { primaryUrl, directUrl };
   };
 
@@ -336,10 +369,14 @@ function playBilingualAudioQueue(chunks: SpeechChunk[], onDone?: () => void): vo
     if (bilingualQueue.length > 0) {
       const nextItem = bilingualQueue[0];
       const urls = getTtsUrls(nextItem);
-      const pre = new Audio(urls.primaryUrl);
-      pre.preload = 'auto';
-      pre.volume = 1.0;
-      nextPreloadedAudio = pre;
+      try {
+        const pre = new Audio(urls.primaryUrl);
+        pre.preload = 'auto';
+        pre.volume = 1.0;
+        nextPreloadedAudio = pre;
+      } catch {
+        nextPreloadedAudio = null;
+      }
     } else {
       nextPreloadedAudio = null;
     }
@@ -357,12 +394,53 @@ function playBilingualAudioQueue(chunks: SpeechChunk[], onDone?: () => void): vo
     const currentChunk = bilingualQueue.shift()!;
     const urls = getTtsUrls(currentChunk);
 
-    const audio = nextPreloadedAudio || new Audio(urls.primaryUrl);
-    nextPreloadedAudio = null;
+    let audio: HTMLAudioElement;
+    if (nextPreloadedAudio) {
+      audio = nextPreloadedAudio;
+      nextPreloadedAudio = null;
+    } else {
+      audio = new Audio(urls.primaryUrl);
+    }
+
     audio.volume = 1.0;
     currentAudio = audio;
 
-    let hasSwitched = false;
+    let hasFallbackRun = false;
+
+    const runFallback = () => {
+      if (hasFallbackRun) return;
+      hasFallbackRun = true;
+
+      // Nếu đang dùng primaryUrl mà bị lỗi (ví dụ 404 trên GitHub Pages hoặc Vercel chưa deploy server)
+      if (isBackendProxyAvailable && urls.primaryUrl !== urls.directUrl) {
+        // Tắt cờ backend proxy để tất cả các câu sau dùng thẳng directUrl
+        isBackendProxyAvailable = false;
+        const freshDirectAudio = new Audio(urls.directUrl);
+        freshDirectAudio.volume = 1.0;
+        currentAudio = freshDirectAudio;
+
+        freshDirectAudio.onended = () => {
+          currentAudio = null;
+          playNext();
+        };
+
+        freshDirectAudio.onerror = () => {
+          // Nếu cả direct Google TTS cũng bị chặn (ví dụ mạng trường học chặn translate.google.com)
+          // -> Tự động chuyển ngay sang Web Speech API của trình duyệt!
+          currentAudio = null;
+          playViaSpeechSynthesis(currentChunk, () => playNext());
+        };
+
+        freshDirectAudio.play().catch(() => {
+          currentAudio = null;
+          playViaSpeechSynthesis(currentChunk, () => playNext());
+        });
+      } else {
+        // Đã thử directUrl nhưng vẫn lỗi -> chuyển sang Web Speech API
+        currentAudio = null;
+        playViaSpeechSynthesis(currentChunk, () => playNext());
+      }
+    };
 
     audio.onended = () => {
       currentAudio = null;
@@ -370,35 +448,13 @@ function playBilingualAudioQueue(chunks: SpeechChunk[], onDone?: () => void): vo
     };
 
     audio.onerror = () => {
-      if (!hasSwitched) {
-        hasSwitched = true;
-        audio.src = urls.directUrl;
-        audio.play().catch(() => {
-          currentAudio = null;
-          playNext();
-        });
-      } else {
-        currentAudio = null;
-        playNext();
-      }
+      runFallback();
     };
 
-    // Nạp sẵn câu tiếp theo để chuyển tiếp mượt mà, giòn nẩy
     preloadNext();
 
-    if (!audio.src) {
-      audio.src = urls.primaryUrl;
-    }
-
     audio.play().catch(() => {
-      if (!hasSwitched) {
-        hasSwitched = true;
-        audio.src = urls.directUrl;
-        audio.play().catch(() => {
-          currentAudio = null;
-          playNext();
-        });
-      }
+      runFallback();
     });
   };
 
@@ -426,7 +482,5 @@ export function speakFemaleHanoi(
   stopSpeech();
   options?.onStart?.();
 
-  // MẶC ĐỊNH & ƯU TIÊN SỐ 1: Google Cloud Dual-Engine (Hanoi Female MC + British English BBC)
-  // Đảm bảo 100% không bao giờ lẫn lộn tiếng Anh - Việt, âm điệu to tròn, giòn, nẩy!
   playBilingualAudioQueue(chunks, options?.onEnd);
 }

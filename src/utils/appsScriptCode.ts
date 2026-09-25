@@ -197,6 +197,7 @@ export function generateStandaloneIndexHtml(): string {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
     <title>Game Học Tập Tiếng Anh 8 - Unit 2: Life in the countryside</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -497,11 +498,8 @@ export function generateStandaloneIndexHtml(): string {
                     </button>
 
                     <div class="certificate-border p-6 md:p-10 rounded-xl shadow-2xl relative overflow-hidden text-center">
-                        <div class="text-xs md:text-sm font-bold uppercase tracking-widest text-slate-700">
-                            BỘ GIÁO DỤC VÀ ĐÀO TẠO • TRƯỜNG THCS TÂN DĨNH
-                        </div>
-                        <div class="text-xs text-amber-700 font-semibold mb-4">
-                            CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM — ĐỘC LẬP - TỰ DO - HẠNH PHÚC
+                        <div class="text-xs md:text-sm font-bold uppercase tracking-wider text-slate-700 mb-4">
+                            Trường THCS Tân Dĩnh, xã Tân Dĩnh, Thành phố Bắc Ninh
                         </div>
 
                         <div class="my-4">
@@ -1012,6 +1010,36 @@ export function generateStandaloneIndexHtml(): string {
 
         var nextAudioPreloaded = null;
 
+        function playViaSpeechSynthesis(chunk, onDone) {
+            if (!('speechSynthesis' in window)) {
+                if (onDone) onDone();
+                return;
+            }
+            try {
+                var utter = new SpeechSynthesisUtterance(chunk.text);
+                utter.lang = chunk.lang === 'en-GB' ? 'en-GB' : 'vi-VN';
+                utter.pitch = chunk.lang === 'en-GB' ? 1.05 : 1.25;
+                utter.rate = 1.02;
+                utter.volume = 1.0;
+                var hasEnded = false;
+                utter.onend = function() {
+                    if (!hasEnded) {
+                        hasEnded = true;
+                        if (onDone) onDone();
+                    }
+                };
+                utter.onerror = function() {
+                    if (!hasEnded) {
+                        hasEnded = true;
+                        if (onDone) onDone();
+                    }
+                };
+                window.speechSynthesis.speak(utter);
+            } catch(e) {
+                if (onDone) onDone();
+            }
+        }
+
         function playGoogleAudioQueue(chunks, onDone) {
             if (!chunks || chunks.length === 0) {
                 if (onDone) onDone();
@@ -1060,14 +1088,14 @@ export function generateStandaloneIndexHtml(): string {
 
                 audio.onerror = function() {
                     currentAudioPlayer = null;
-                    playNext();
+                    playViaSpeechSynthesis(chunk, function() { playNext(); });
                 };
 
                 preloadNext();
 
                 audio.play().catch(function() {
                     currentAudioPlayer = null;
-                    playNext();
+                    playViaSpeechSynthesis(chunk, function() { playNext(); });
                 });
             }
 
@@ -1120,6 +1148,8 @@ export function generateStandaloneIndexHtml(): string {
             sendChatMessage();
         }
 
+        var latestSpeechTranscript = '';
+
         function initSpeechRecognition() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) return null;
@@ -1131,8 +1161,13 @@ export function generateStandaloneIndexHtml(): string {
 
             rec.onstart = function() {
                 isRecording = true;
-                document.getElementById('voice-status-bar').classList.remove('hidden');
-                document.getElementById('btn-voice-input').classList.add('recording-pulse', 'border-rose-500', 'text-rose-400');
+                latestSpeechTranscript = '';
+                const bar = document.getElementById('voice-status-bar');
+                if (bar) bar.classList.remove('hidden');
+                const txt = document.getElementById('voice-status-text');
+                if (txt) txt.innerText = "Đang lắng nghe em nói... (Nói xong câu hỏi sẽ tự động gửi)";
+                const btn = document.getElementById('btn-voice-input');
+                if (btn) btn.classList.add('recording-pulse', 'border-rose-500', 'text-rose-400');
             };
 
             rec.onresult = function(event) {
@@ -1140,7 +1175,11 @@ export function generateStandaloneIndexHtml(): string {
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     transcript += event.results[i][0].transcript;
                 }
-                document.getElementById('chat-text-input').value = transcript;
+                if (transcript.trim()) {
+                    latestSpeechTranscript = transcript.trim();
+                    const inputEl = document.getElementById('chat-text-input');
+                    if (inputEl) inputEl.value = transcript;
+                }
             };
 
             rec.onerror = function() {
@@ -1149,22 +1188,48 @@ export function generateStandaloneIndexHtml(): string {
 
             rec.onend = function() {
                 stopVoiceRecognition();
+                // TỰ ĐỘNG NHẢY VÀO Ô CHAT VÀ GỬI CÂU HỎI
+                var textToSend = latestSpeechTranscript.trim();
+                if (textToSend) {
+                    try { localStorage.setItem('last_speech_query', textToSend); } catch(e) {}
+                    latestSpeechTranscript = '';
+                    const inputEl = document.getElementById('chat-text-input');
+                    if (inputEl) inputEl.value = textToSend;
+                    sendChatMessage();
+                }
             };
 
             return rec;
         }
 
-        function toggleVoiceRecognition() {
+        async function toggleVoiceRecognition() {
             playSound('click');
+
+            // Chủ động kích hoạt popup cấp quyền Micro cho bất kỳ ai
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                try {
+                    var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    stream.getTracks().forEach(function(t) { t.stop(); });
+                } catch(err) {
+                    console.warn('Microphone permission check:', err);
+                }
+            }
+
             if (!speechRecognition) speechRecognition = initSpeechRecognition();
 
             if (!speechRecognition) {
-                alert("Trình duyệt hiện tại chưa hỗ trợ nhận diện giọng nói. Em gõ văn bản nhé!");
+                const inputEl = document.getElementById('chat-text-input');
+                if (inputEl) {
+                    inputEl.placeholder = "Trình duyệt chưa hỗ trợ Web Speech. Em hãy gõ phím nhé!";
+                    setTimeout(function() {
+                        inputEl.placeholder = "Hỏi cô Yến điều gì đó...";
+                    }, 4000);
+                }
                 return;
             }
 
             if (isRecording) {
-                speechRecognition.stop();
+                try { speechRecognition.stop(); } catch(e) {}
             } else {
                 try { speechRecognition.start(); } catch(e) {}
             }
@@ -1172,9 +1237,10 @@ export function generateStandaloneIndexHtml(): string {
 
         function stopVoiceRecognition() {
             isRecording = false;
-            document.getElementById('voice-status-bar').classList.add('hidden');
+            const bar = document.getElementById('voice-status-bar');
+            if (bar) bar.classList.add('hidden');
             const btn = document.getElementById('btn-voice-input');
-            btn.classList.remove('recording-pulse', 'border-rose-500', 'text-rose-400');
+            if (btn) btn.classList.remove('recording-pulse', 'border-rose-500', 'text-rose-400');
             if (speechRecognition) {
                 try { speechRecognition.stop(); } catch(e) {}
             }

@@ -33,9 +33,11 @@ export const ChatbotWidget: React.FC<ChatbotWidgetProps> = ({ soundEnabled }) =>
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [isTtsEnabled, setIsTtsEnabled] = useState<boolean>(true);
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+  const [voiceNotice, setVoiceNotice] = useState<string>('');
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const speechRecognitionRef = useRef<any>(null);
+  const recordedTextRef = useRef<string>('');
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -147,21 +149,41 @@ export const ChatbotWidget: React.FC<ChatbotWidgetProps> = ({ soundEnabled }) =>
     }
   };
 
-  const toggleRecording = () => {
+  const toggleRecording = async () => {
     playSoundEffect('click', soundEnabled);
     if (typeof window === 'undefined') return;
 
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRec) {
-      alert('Trình duyệt hiện tại chưa hỗ trợ nhận diện giọng nói. Em gõ văn bản nhé!');
-      return;
-    }
 
     if (isRecording) {
       if (speechRecognitionRef.current) {
-        speechRecognitionRef.current.stop();
+        try {
+          speechRecognitionRef.current.stop();
+        } catch {}
       }
       setIsRecording(false);
+      return;
+    }
+
+    // Yêu cầu quyền Micro chủ động để bật popup cấp quyền cho mọi người dùng
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Tắt ngay luồng tạm để bộ nhận diện giọng nói có toàn quyền sử dụng Micro
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (err: any) {
+        console.warn('Microphone permission check:', err);
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          setVoiceNotice('Em hãy bấm "Cho phép" (Allow) quyền dùng Micro trên thanh địa chỉ trình duyệt để nói nhé!');
+          setTimeout(() => setVoiceNotice(''), 7000);
+          return;
+        }
+      }
+    }
+
+    if (!SpeechRec) {
+      setVoiceNotice('Trình duyệt chưa hỗ trợ Web Speech. Em hãy gõ phím vào ô chat nhé!');
+      setTimeout(() => setVoiceNotice(''), 5000);
       return;
     }
 
@@ -171,8 +193,11 @@ export const ChatbotWidget: React.FC<ChatbotWidgetProps> = ({ soundEnabled }) =>
       rec.interimResults = true;
       rec.lang = 'vi-VN';
 
+      recordedTextRef.current = '';
+
       rec.onstart = () => {
         setIsRecording(true);
+        setVoiceNotice('🎤 Đang lắng nghe... Hãy nói câu hỏi, cô Yến sẽ tự động nhận diện!');
       };
 
       rec.onresult = (event: any) => {
@@ -180,21 +205,51 @@ export const ChatbotWidget: React.FC<ChatbotWidgetProps> = ({ soundEnabled }) =>
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           transcript += event.results[i][0].transcript;
         }
-        setInputVal(transcript);
+        if (transcript.trim()) {
+          recordedTextRef.current = transcript.trim();
+          setInputVal(transcript);
+        }
       };
 
-      rec.onerror = () => {
+      rec.onerror = (event: any) => {
+        console.warn('Speech recognition error:', event);
         setIsRecording(false);
+        if (event.error === 'not-allowed') {
+          setVoiceNotice('Quyền Micro chưa được cấp. Hãy bật Micro trong Cài đặt trang web.');
+          setTimeout(() => setVoiceNotice(''), 6000);
+        } else if (event.error === 'no-speech') {
+          setVoiceNotice('Chưa nghe thấy giọng nói, em bấm lại micro và nói nhé!');
+          setTimeout(() => setVoiceNotice(''), 4000);
+        }
       };
 
       rec.onend = () => {
         setIsRecording(false);
+        const textToSubmit = recordedTextRef.current.trim();
+        if (textToSubmit) {
+          // Lưu sao lưu vào localStorage phòng khi mất mạng
+          try {
+            localStorage.setItem('last_speech_query', textToSubmit);
+          } catch {}
+
+          setVoiceNotice(`🚀 Đã nhận diện: "${textToSubmit}" ➔ Đang tự động gửi...`);
+          recordedTextRef.current = '';
+          setInputVal('');
+
+          // Tự động nhảy vào ô chat và gửi câu hỏi cho Miss Yến còi
+          handleSendMessage(textToSubmit);
+          setTimeout(() => setVoiceNotice(''), 3000);
+        } else {
+          setVoiceNotice('');
+        }
       };
 
       speechRecognitionRef.current = rec;
       rec.start();
     } catch {
       setIsRecording(false);
+      setVoiceNotice('Không thể kích hoạt Micro. Em hãy kiểm tra lại thiết bị nhé!');
+      setTimeout(() => setVoiceNotice(''), 4000);
     }
   };
 
@@ -405,19 +460,25 @@ export const ChatbotWidget: React.FC<ChatbotWidgetProps> = ({ soundEnabled }) =>
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Voice status bar */}
-          {isRecording && (
-            <div className="bg-rose-950/90 border-t border-rose-500/50 px-3 py-1.5 text-rose-200 text-xs flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
-                <span>Đang lắng nghe em nói qua Micro...</span>
+          {/* Voice status & Notification bar */}
+          {(isRecording || voiceNotice) && (
+            <div className={`border-t px-3 py-1.5 text-xs flex items-center justify-between transition-all ${
+              isRecording 
+                ? 'bg-rose-950/95 border-rose-500/50 text-rose-200' 
+                : 'bg-indigo-950/95 border-indigo-500/50 text-indigo-200'
+            }`}>
+              <span className="flex items-center gap-2 truncate">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${isRecording ? 'bg-rose-500 animate-ping' : 'bg-emerald-400'}`}></span>
+                <span className="truncate">{voiceNotice || 'Đang lắng nghe em nói qua Micro...'}</span>
               </span>
-              <button
-                onClick={toggleRecording}
-                className="text-xs bg-rose-700 hover:bg-rose-600 px-2 py-0.5 rounded text-white font-bold"
-              >
-                Dừng
-              </button>
+              {isRecording && (
+                <button
+                  onClick={toggleRecording}
+                  className="text-[11px] bg-rose-700 hover:bg-rose-600 px-2.5 py-0.5 rounded text-white font-bold ml-2 shrink-0 transition"
+                >
+                  Xong & Gửi
+                </button>
+              )}
             </div>
           )}
 
